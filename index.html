@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1220" />
+    <title>Frontier Fortune</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <div class="title">Frontier Fortune</div>
+        <div class="subtitle">Trade your way to 100,000 credits</div>
+      </div>
+      <div class="status" id="status"></div>
+    </header>
+
+    <main class="main">
+      <section class="card">
+        <div class="cardHead">
+          <div class="cardTitle" id="screenTitle">Main Menu</div>
+          <div class="cardActions">
+            <button class="btn ghost" id="btnBack" type="button" hidden>Back</button>
+            <button class="btn ghost" id="btnReset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div id="message" class="message" aria-live="polite"></div>
+
+        <div id="screen"></div>
+      </section>
+      <footer class="foot">
+        Tip: Add to Home Screen from Safari for an app-like feel.
+      </footer>
+    </main>
+
+    <dialog id="confirmDialog" class="dialog">
+      <form method="dialog" class="dialogBody">
+        <div class="dialogTitle" id="confirmTitle">Confirm</div>
+        <div class="dialogText" id="confirmText"></div>
+        <div class="dialogActions">
+          <button class="btn ghost" value="cancel">Cancel</button>
+          <button class="btn" value="ok">OK</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
+
