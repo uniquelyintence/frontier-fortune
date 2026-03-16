@@ -244,18 +244,19 @@
   function renderMenu(game) {
     screenTitleEl.textContent = "Main Menu";
     setBackVisible(false);
+    const p = game.planet;
+    const pl = game.player;
     screenEl.innerHTML = `
-      <div class="row">
-        <div class="pill">Goal: ${fmt(WIN_CREDITS)} credits</div>
-        <div class="pill">Travel cost: ${fmt(TRAVEL_COST)}</div>
-        <div class="pill">Lose if credits &lt; ${fmt(TRAVEL_COST)}</div>
+      <div class="form">
+        <div style="font-weight:800; margin-bottom:6px">Current status</div>
+        <div class="statusOverviewLine"><b>Planet</b> ${escapeHtml(p.name)}</div>
+        <div class="statusOverviewLine"><b>Economy</b> ${escapeHtml(p.economy)}</div>
+        <div class="statusOverviewLine"><b>Credits</b> ${fmt(pl.credits)}</div>
+        <div class="statusOverviewLine"><b>Cargo</b> ${pl.cargoUsed()} / ${pl.capacity}</div>
       </div>
       <div class="grid menu" style="margin-top:12px">
-        <button class="btn" data-go="market" type="button">View Market</button>
-        <button class="btn" data-go="buy" type="button">Buy Goods</button>
-        <button class="btn" data-go="sell" type="button">Sell Goods</button>
+        <button class="btn" data-go="market" type="button">Trade at Market</button>
         <button class="btn" data-go="travel" type="button">Travel</button>
-        <button class="btn" data-go="cargo" type="button">View Cargo</button>
         <button class="btn warn" data-go="about" type="button">Help / Rules</button>
       </div>
     `;
@@ -271,29 +272,104 @@
     screenTitleEl.textContent = "Market";
     setBackVisible(true);
     const p = game.planet;
+    const pl = game.player;
     const rows = GOODS.map((g) => {
       const price = p.market[g.name];
-      const owned = game.player.cargo[g.name] || 0;
+      const owned = pl.cargo[g.name] || 0;
       return `<tr>
-        <td>${escapeHtml(g.name)}</td>
+        <td>
+          <div class="goodMain">${escapeHtml(g.name)}</div>
+          <div class="marketActions">
+            <input class="marketQty" inputmode="numeric" pattern="[0-9]*" placeholder="Qty" />
+            <button class="btn sm" data-action="buy" type="button">Buy</button>
+            <button class="btn sm ghost" data-action="sell" type="button">Sell</button>
+          </div>
+        </td>
         <td class="num">${fmt(price)}</td>
         <td class="num">${fmt(owned)}</td>
       </tr>`;
     }).join("");
 
     screenEl.innerHTML = `
-      <div class="tableWrap">
+      <div class="form">
+        <div style="font-weight:800; margin-bottom:6px">Market overview</div>
+        <div class="statusOverviewLine"><b>Credits</b> ${fmt(pl.credits)}</div>
+        <div class="statusOverviewLine"><b>Cargo</b> ${pl.cargoUsed()} / ${pl.capacity}</div>
+        <div class="statusOverviewLine" style="margin-top:8px">
+          <button class="btn sm ghost" data-go="cargo" type="button">View cargo details</button>
+        </div>
+      </div>
+      <div class="tableWrap" style="margin-top:12px">
         <table>
           <thead><tr><th>Good</th><th class="num">Price</th><th class="num">Owned</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div class="row" style="margin-top:12px">
-        <button class="btn" data-go="buy" type="button">Buy</button>
-        <button class="btn" data-go="sell" type="button">Sell</button>
-      </div>
     `;
-    screenEl.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => navigate(game, b.getAttribute("data-go"))));
+
+    screenEl.querySelectorAll("tbody tr").forEach((row, idx) => {
+      const good = GOODS[idx].name;
+      const qtyInput = row.querySelector(".marketQty");
+      const buyBtn = row.querySelector('[data-action="buy"]');
+      const sellBtn = row.querySelector('[data-action="sell"]');
+
+      function getQty(defaultMax) {
+        const raw = parseInt(qtyInput.value, 10);
+        if (!Number.isFinite(raw) || raw <= 0) return 0;
+        return clampInt(raw, 1, defaultMax);
+      }
+
+      if (buyBtn) {
+        buyBtn.addEventListener("click", () => {
+          const price = p.market[good];
+          const maxBySpace = pl.cargoFree();
+          const maxByMoney = Math.floor(pl.credits / price);
+          const maxQty = Math.max(0, Math.min(maxBySpace, maxByMoney));
+          if (!maxQty) {
+            setMessage("bad", "You can't afford any or you have no cargo space.");
+            return;
+          }
+          const qty = getQty(maxQty);
+          if (!qty || qty > maxQty) {
+            setMessage("bad", `Enter a quantity from 1 to ${maxQty}.`);
+            return;
+          }
+          const res = pl.buy(good, qty, price);
+          setMessage(res.ok ? "good" : "bad", res.msg);
+          saveGame(game);
+          renderStatus(game);
+          renderMarket(game);
+          checkEndState(game);
+        });
+      }
+
+      if (sellBtn) {
+        sellBtn.addEventListener("click", () => {
+          const owned = pl.cargo[good] || 0;
+          const price = p.market[good];
+          if (!owned) {
+            setMessage("bad", `You don't have any ${good} to sell.`);
+            return;
+          }
+          const qty = getQty(owned);
+          if (!qty || qty > owned) {
+            setMessage("bad", `Enter a quantity from 1 to ${owned}.`);
+            return;
+          }
+          const res = pl.sell(good, qty, price);
+          setMessage(res.ok ? "good" : "bad", res.msg);
+          saveGame(game);
+          renderStatus(game);
+          renderMarket(game);
+          checkEndState(game);
+        });
+      }
+    });
+
+    const cargoBtn = screenEl.querySelector('[data-go="cargo"]');
+    if (cargoBtn) {
+      cargoBtn.addEventListener("click", () => navigate(game, "cargo"));
+    }
   }
 
   function renderCargo(game) {
@@ -523,7 +599,7 @@
         <div class="form">
           <div style="font-weight:800; margin-bottom:8px">Travel</div>
           <div style="color: var(--muted)">
-            Travel costs <b>${fmt(TRAVEL_COST)}</b> credits. If your credits drop below that, you lose.
+            Travel costs <b>${fmt(TRAVEL_COST)}</b> credits. If your credits drop below ${fmt(TRAVEL_COST)}, you lose.
           </div>
         </div>
         <div class="form">

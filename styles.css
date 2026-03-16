@@ -114,19 +114,50 @@ body{
   background: rgba(255,90,103,.14);
 }
 
+.btn.sm{
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  width: auto;
+}
+
 .tableWrap{overflow:auto; border-radius: var(--radiusSm); border: 1px solid var(--line)}
-table{width:100%; border-collapse:collapse; min-width: 420px}
+table{width:100%; border-collapse:collapse}
 th,td{padding: 10px 10px; border-bottom: 1px solid var(--line); text-align:left}
 th{font-size: 12px; color: var(--muted); font-family: var(--mono); font-weight: 700}
 td{font-size: 14px}
 td.num{text-align:right; font-family: var(--mono)}
 tr:last-child td{border-bottom:none}
 
+.marketActions{
+  display:flex;
+  gap: 6px;
+  align-items:center;
+  flex-wrap: wrap;
+}
+
+.marketActions .marketQty{
+  max-width: 72px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.goodMain{
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
 .form{
   border: 1px solid var(--line);
   border-radius: var(--radiusSm);
   padding: 12px;
   background: rgba(255,255,255,.03);
+}
+.statusOverviewLine{
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 3px;
 }
 .form label{display:block; font-size: 12px; color: var(--muted); font-family: var(--mono); margin-bottom: 6px}
 .form input, .form select{
@@ -152,18 +183,31 @@ tr:last-child td{border-bottom:none}
 }
 
 .dialog::backdrop{background: rgba(0,0,0,.55)}
+.dialog{
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-width: calc(100vw - (var(--pad) * 2));
+  max-height: calc(100dvh - (var(--pad) * 2));
+}
 .dialogBody{
-  width: min(92vw, 440px);
+  width: min(calc(100vw - (var(--pad) * 2)), 440px);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #0f1a32;
   color: var(--text);
   padding: 14px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - (var(--pad) * 2) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
-.dialogTitle{font-weight: 800; margin-bottom: 8px}
-.dialogText{color: var(--muted); margin-bottom: 14px}
-.dialogActions{display:flex; gap: 10px; justify-content:flex-end}
-.dialogActions .btn{width:auto}
+.dialogTitle{font-weight: 800; margin-bottom: 8px; overflow-wrap:anywhere}
+.dialogText{color: var(--muted); margin-bottom: 14px; overflow-wrap:anywhere; word-break: break-word}
+.dialogActions{display:flex; gap: 10px; justify-content:flex-end; flex-wrap: wrap}
+.dialogActions .btn{width:auto; max-width: 100%}
 
 @media (min-width: 760px){
   .menu{grid-template-columns: 1fr 1fr}
