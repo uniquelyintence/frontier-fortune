@@ -1,4 +1,5 @@
 import random
+import math
 from dataclasses import dataclass, field
 
 
@@ -23,6 +24,20 @@ TRAVEL_COST = 100
 START_CREDITS = 5000
 WIN_CREDITS = 100_000
 START_CAPACITY = 20
+START_STARDATE = 7421.0  # shared start date for all runs
+GALAXY_SEED = 424242
+PLANET_COUNT = 50
+CLUSTER_COUNT = 5
+MAP_SIZE = 100.0
+CLUSTER_RADIUS = 14.0
+ROUTE_TARGET_K = 3
+ROUTE_MIN_DEGREE = 2
+ROUTE_MAX_DEGREE = 4
+TRAVEL_SPEED = 20.0
+
+
+def fmt_stardate(travel_jumps: int) -> str:
+    return f"Stardate {START_STARDATE + travel_jumps:.1f}"
 
 
 def clamp_int(n: int, min_v: int, max_v: int) -> int:
@@ -52,6 +67,8 @@ def fmt_credits(c: int) -> str:
 class Planet:
     name: str
     economy: str
+    x: float
+    y: float
     market: dict[str, int] = field(default_factory=dict)
 
     def regenerate_market(self, rng: random.Random) -> None:
@@ -105,15 +122,25 @@ class Player:
 class Universe:
     def __init__(self, rng: random.Random) -> None:
         self.rng = rng
-        self.planets: list[Planet] = self._generate_planets(10)
+        self.planets: list[Planet] = self._generate_planets(PLANET_COUNT)
+        self.routes: list[list[dict[str, float | int]]] = self._generate_routes()
 
     def _generate_planets(self, count: int) -> list[Planet]:
         economies = list(ECONOMIES.keys())
         names = self._generate_unique_names(count)
+        centers: list[tuple[float, float]] = [
+            (self.rng.random() * MAP_SIZE, self.rng.random() * MAP_SIZE) for _ in range(CLUSTER_COUNT)
+        ]
         planets: list[Planet] = []
-        for name in names:
+        for i, name in enumerate(names):
+            cx, cy = centers[i % CLUSTER_COUNT]
+            angle = self.rng.random() * math.tau
+            radius = math.sqrt(self.rng.random()) * CLUSTER_RADIUS
+            x = max(0.0, min(MAP_SIZE, cx + math.cos(angle) * radius))
+            y = max(0.0, min(MAP_SIZE, cy + math.sin(angle) * radius))
+
             eco = self.rng.choice(economies)
-            p = Planet(name=name, economy=eco)
+            p = Planet(name=name, economy=eco, x=x, y=y)
             p.regenerate_market(self.rng)
             planets.append(p)
         return planets
@@ -141,18 +168,135 @@ class Universe:
                 results.append(f"{NAME_WORDS[i % len(NAME_WORDS)]}-{100 + i}")
         return results
 
+    def _dist(self, a: int, b: int) -> float:
+        pa = self.planets[a]
+        pb = self.planets[b]
+        return math.hypot(pa.x - pb.x, pa.y - pb.y)
+
+    def _route_time(self, distance: float) -> int:
+        return max(1, int(math.ceil(distance / TRAVEL_SPEED)))
+
+    def _generate_routes(self) -> list[list[dict[str, float | int]]]:
+        n = len(self.planets)
+        neighbors: list[dict[int, tuple[float, int]]] = [dict() for _ in range(n)]  # to -> (distance, time)
+
+        def add_edge(i: int, j: int) -> None:
+            if i == j:
+                return
+            d = self._dist(i, j)
+            t = self._route_time(d)
+            neighbors[i][j] = (d, t)
+            neighbors[j][i] = (d, t)
+
+        # k-nearest neighbors
+        for i in range(n):
+            ds = [(self._dist(i, j), j) for j in range(n) if j != i]
+            ds.sort(key=lambda x: x[0])
+            for _, j in ds[:ROUTE_TARGET_K]:
+                add_edge(i, j)
+
+        def prune_to_max_degree() -> None:
+            changed = True
+            while changed:
+                changed = False
+                for i in range(n):
+                    while len(neighbors[i]) > ROUTE_MAX_DEGREE:
+                        worst_j = max(neighbors[i].items(), key=lambda kv: kv[1][0])[0]
+                        neighbors[i].pop(worst_j, None)
+                        neighbors[worst_j].pop(i, None)
+                        changed = True
+
+        def ensure_min_degree() -> None:
+            for i in range(n):
+                if len(neighbors[i]) >= ROUTE_MIN_DEGREE:
+                    continue
+                candidates: list[tuple[float, int]] = []
+                for j in range(n):
+                    if i == j or j in neighbors[i]:
+                        continue
+                    if len(neighbors[j]) >= ROUTE_MAX_DEGREE:
+                        continue
+                    candidates.append((self._dist(i, j), j))
+                candidates.sort(key=lambda x: x[0])
+                for _, j in candidates:
+                    if len(neighbors[i]) >= ROUTE_MIN_DEGREE:
+                        break
+                    if len(neighbors[j]) >= ROUTE_MAX_DEGREE:
+                        continue
+                    add_edge(i, j)
+
+        def components() -> list[list[int]]:
+            seen = [False] * n
+            comps: list[list[int]] = []
+            for i in range(n):
+                if seen[i]:
+                    continue
+                stack = [i]
+                seen[i] = True
+                comp: list[int] = []
+                while stack:
+                    cur = stack.pop()
+                    comp.append(cur)
+                    for to in neighbors[cur].keys():
+                        if not seen[to]:
+                            seen[to] = True
+                            stack.append(to)
+                comps.append(comp)
+            return comps
+
+        prune_to_max_degree()
+        ensure_min_degree()
+
+        comps = components()
+        while len(comps) > 1:
+            a = comps[0]
+            best: tuple[float, int, int] | None = None
+            for b in comps[1:]:
+                for i in a:
+                    if len(neighbors[i]) >= ROUTE_MAX_DEGREE:
+                        continue
+                    for j in b:
+                        if len(neighbors[j]) >= ROUTE_MAX_DEGREE:
+                            continue
+                        d = self._dist(i, j)
+                        if best is None or d < best[0]:
+                            best = (d, i, j)
+            if best is None:
+                b = comps[1]
+                fallback = min(((self._dist(i, j), i, j) for i in a for j in b), key=lambda x: x[0])
+                add_edge(fallback[1], fallback[2])
+            else:
+                add_edge(best[1], best[2])
+            prune_to_max_degree()
+            ensure_min_degree()
+            comps = components()
+
+        routes: list[list[dict[str, float | int]]] = []
+        for i in range(n):
+            rlist = [{"to": j, "distance": d, "time": t} for j, (d, t) in neighbors[i].items()]
+            rlist.sort(key=lambda r: float(r["distance"]))
+            routes.append(rlist)
+        return routes
+
 
 class Game:
     def __init__(self, seed: int | None = None) -> None:
-        self.rng = random.Random(seed)
+        self.rng = random.Random(GALAXY_SEED if seed is None else seed)
         self.universe = Universe(self.rng)
         self.player = Player()
-        self.current_idx = self.rng.randrange(len(self.universe.planets))
+        self.current_idx = 0
         self.current_planet.regenerate_market(self.rng)
+        self.travel_jumps = 0
+        self.known_planets: set[int] = {self.current_idx}
+        self._scan_current_planet()
 
     @property
     def current_planet(self) -> Planet:
         return self.universe.planets[self.current_idx]
+
+    def _scan_current_planet(self) -> None:
+        for r in self.universe.routes[self.current_idx]:
+            self.known_planets.add(int(r["to"]))
 
     def run(self) -> None:
         self._clear()
@@ -196,6 +340,8 @@ class Game:
         print("\n" + "=" * 60)
         print(f"Current planet: {p.name}")
         print(f"Planet economy: {p.economy}")
+        print(f"Coords: ({p.x:.1f}, {p.y:.1f})")
+        print(f"Time: {fmt_stardate(self.travel_jumps)}")
         print(f"Credits: {fmt_credits(pl.credits)}")
         print(f"Cargo: {pl.cargo_used()} / {pl.capacity}")
         print("=" * 60)
@@ -284,28 +430,45 @@ class Game:
             input("Press Enter to return...")
             return
 
-        planets = self.universe.planets
         cur = self.current_idx
         print("\nTravel")
         print("-" * 60)
-        for i, p in enumerate(planets, start=1):
-            tag = " (current)" if (i - 1) == cur else ""
-            print(f"{i:>2}. {p.name:<18} {p.economy:<12}{tag}")
+        routes = [r for r in self.universe.routes[cur] if int(r["to"]) in self.known_planets]
+        if not routes:
+            print("(No known routes from here.)")
+            input("Press Enter to return...")
+            return
+
+        for i, r in enumerate(routes, start=1):
+            to = int(r["to"])
+            p = self.universe.planets[to]
+            d = float(r["distance"])
+            t = int(r["time"])
+            print(f"{i:>2}. {p.name:<18} {p.economy:<12} {d:>5.0f} AU  +{t} jumps")
         print("B. Back")
-        sel = input(f"Destination (cost {TRAVEL_COST}) : ").strip().lower()
+        sel = input(f"Route (cost {TRAVEL_COST}) : ").strip().lower()
         if sel in {"b", "back", ""}:
             return
         try:
-            idx = int(sel) - 1
+            choice = int(sel) - 1
         except ValueError:
-            print("Invalid destination.")
+            print("Invalid route.")
             return
-        if not (0 <= idx < len(planets)) or idx == cur:
+        if not (0 <= choice < len(routes)):
+            print("Invalid route.")
+            return
+
+        dest_idx = int(routes[choice]["to"])
+        time_cost = int(routes[choice]["time"])
+        if dest_idx == cur:
             print("Invalid destination.")
             return
 
         self.player.credits -= TRAVEL_COST
-        self.current_idx = idx
+        self.current_idx = dest_idx
+        self.travel_jumps += time_cost
+        self.known_planets.add(self.current_idx)
+        self._scan_current_planet()
         self.current_planet.regenerate_market(self.rng)
         print(f"\nArrived at {self.current_planet.name}. Markets have shifted.")
         input("Press Enter to continue...")
@@ -330,6 +493,7 @@ class Game:
         print("You did it!")
         print("-" * 60)
         print(f"You reached {fmt_credits(self.player.credits)} credits and became a legend of the frontier.")
+        print(f"Final time: {fmt_stardate(self.travel_jumps)} ({self.travel_jumps} travel jumps)")
         input("\nPress Enter to exit...")
 
     def _lose(self) -> None:
@@ -338,6 +502,7 @@ class Game:
         print("-" * 60)
         print(f"You have {fmt_credits(self.player.credits)} credits—less than the {TRAVEL_COST} needed to travel.")
         print("Your trading career ends here.")
+        print(f"Final time: {fmt_stardate(self.travel_jumps)} ({self.travel_jumps} travel jumps)")
         input("\nPress Enter to exit...")
 
     def _clear(self) -> None:
